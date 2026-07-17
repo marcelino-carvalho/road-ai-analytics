@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Relatórios gerados pelo sistema
+relatorios-gerados/
+
+# Arquivos Excel gerados
+*.xlsx
+
+# Configurações privadas
+src/config/config.py
