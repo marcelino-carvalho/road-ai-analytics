@@ -2,9 +2,17 @@ import asyncio
 import os
 import pandas as pd
 
+from src.analytics.familias import identificar_familia
+
 from playwright.async_api import async_playwright
+
 from src.config.config import URL
 from src.automation.login import realizar_login
+
+from src.analytics.avaliador_ia import (
+    avaliar_deteccao,
+    avaliar_classificacao
+)
 
 
 # ==========================================
@@ -16,11 +24,15 @@ async def acessar_lista_detecoes(pagina, data_inicio, data_fim):
 
     print("\nAbrindo o menu Rodovia...")
 
-    await pagina.locator('a[href="#highway"]').click()
+    await pagina.locator(
+        'a[href="#highway"]'
+    ).click()
+
     await pagina.wait_for_timeout(500)
 
 
     print("Clicando em Triagem...")
+
 
     await pagina.locator(
         'a[href="/highway/triage/"]'
@@ -56,7 +68,6 @@ async def acessar_lista_detecoes(pagina, data_inicio, data_fim):
     )
 
 
-
     print("Aplicando filtros...")
 
 
@@ -69,6 +80,7 @@ async def acessar_lista_detecoes(pagina, data_inicio, data_fim):
     await pagina.wait_for_load_state(
         "networkidle"
     )
+
 
 
 
@@ -138,6 +150,7 @@ async def extrair_dados_tabela(pagina):
 
 
 
+
 async def processar_aba_paralela(
         contexto,
         url,
@@ -171,17 +184,18 @@ async def processar_aba_paralela(
     )
 
 
-
     print(
         f"-> Página {numero_pagina}: {len(dados)} registros"
     )
-
 
 
     await nova_pagina.close()
 
 
     return dados
+
+
+
 
 # ==========================================
 # 2. EXECUÇÃO PRINCIPAL
@@ -193,6 +207,7 @@ async def main():
     print("=======================================")
     print("   INICIANDO EXTRAÇÃO E ANÁLISE IA")
     print("=======================================")
+
 
 
     data_inicio_input = input(
@@ -221,7 +236,9 @@ async def main():
 
 
 
-        await pagina_principal.goto(URL)
+        await pagina_principal.goto(
+            URL
+        )
 
 
         await pagina_principal.wait_for_load_state(
@@ -232,11 +249,6 @@ async def main():
 
         await realizar_login(
             pagina_principal
-        )
-
-
-        await pagina_principal.wait_for_load_state(
-            "networkidle"
         )
 
 
@@ -256,15 +268,19 @@ async def main():
         print("\nLendo Página 1...")
 
 
-        dados_pag_1 = await extrair_dados_tabela(
-            pagina_principal
-        )
-
-
         todos_os_dados.extend(
-            dados_pag_1
+
+            await extrair_dados_tabela(
+                pagina_principal
+            )
+
         )
 
+
+
+        # ==========================
+        # PAGINAÇÃO
+        # ==========================
 
 
         botao_proxima = pagina_principal.locator(
@@ -272,8 +288,8 @@ async def main():
         )
 
 
-
         if await botao_proxima.is_visible():
+
 
             link_prox = await botao_proxima.get_attribute(
                 "href"
@@ -295,7 +311,6 @@ async def main():
             )
 
 
-
             pagina_atual = 2
 
             continuar = True
@@ -311,9 +326,8 @@ async def main():
 
 
                 print(
-                    f"\nExtraindo páginas {pagina_atual} até {pagina_atual + 4}"
+                    f"\nExtraindo páginas {pagina_atual} até {pagina_atual+4}"
                 )
-
 
 
                 for i in range(5):
@@ -322,13 +336,14 @@ async def main():
 
 
                     tarefas.append(
+
                         processar_aba_paralela(
                             contexto,
                             f"{url_base_paginas}{numero}",
                             numero
                         )
-                    )
 
+                    )
 
 
                 resultados = await asyncio.gather(
@@ -344,7 +359,6 @@ async def main():
 
                         continuar = False
                         break
-
 
 
                     if dados == ultima_pagina:
@@ -375,7 +389,6 @@ async def main():
 
 
 
-
         print("\n=======================================")
 
         print(
@@ -386,10 +399,8 @@ async def main():
 
 
 
-
-
         # ==========================================
-        # ANÁLISE
+        # ANÁLISE IA
         # ==========================================
 
 
@@ -397,111 +408,142 @@ async def main():
             todos_os_dados
         )
 
+        df["Família"] = df["Objeto Real"].apply(
+            identificar_familia
+        )
 
+        df["Resultado Detecção"] = (
 
-        # Remove objetos ainda não avaliados
+            df.apply(
 
-        df_avaliado = df[
-            df["Objeto Real"].str.strip() != "-"
-        ].copy()
+                lambda row:
 
+                avaliar_deteccao(
+                    row["IA Detectou"],
+                    row["Objeto Real"]
+                ),
 
-
-        def comparar_ia_humano(row):
-
-
-            ia = (
-                row["IA Detectou"]
-                .strip()
-                .lower()
-            )
-
-
-            humano = (
-                row["Objeto Real"]
-                .strip()
-                .lower()
-            )
-
-
-
-            if ia == humano:
-
-                return "Acerto"
-
-            else:
-
-                return "Erro"
-
-
-
-
-        df_avaliado["Resultado"] = (
-            df_avaliado.apply(
-                comparar_ia_humano,
                 axis=1
+
             )
+
+        )
+
+        print(
+            df["Resultado Detecção"].value_counts()
+        )
+
+        print(
+            "\nRegistros 'Não confirmado':"
+        )
+
+        print(
+            df[
+                df["Resultado Detecção"]
+                ==
+                "Não confirmado"
+            ][
+                [
+                    "IA Detectou",
+                    "Objeto Real",
+                    "Data"
+                ]
+            ]
+        )
+
+
+        df["Resultado Classificação"] = (
+
+            df.apply(
+
+                lambda row:
+
+                avaliar_classificacao(
+                    row["IA Detectou"],
+                    row["Objeto Real"]
+                ),
+
+                axis=1
+
+            )
+
         )
 
 
 
 
         # ==========================================
-        # MÉTRICAS GERAIS
+        # MÉTRICAS
         # ==========================================
-
-
-        total_capturado = len(df)
-
-
-        total_avaliado = len(df_avaliado)
-
-
-
-        acertos = (
-            df_avaliado["Resultado"]
-            ==
-            "Acerto"
-        ).sum()
-
-
-
-        erros = (
-            df_avaliado["Resultado"]
-            ==
-            "Erro"
-        ).sum()
-
 
 
         metricas = pd.DataFrame({
 
             "Métrica":[
 
-                "Total imagens capturadas",
+                "Total capturado",
 
-                "Imagens avaliadas",
+                "Problemas confirmados",
 
-                "Acertos",
+                "Falsos positivos",
 
-                "Erros de detecção"
+                "Pendentes",
+
+                "Classificação correta",
+
+                "Classe diferente"
 
             ],
 
 
             "Valor":[
 
-                total_capturado,
 
-                total_avaliado,
+                len(df),
 
-                acertos,
 
-                erros
+                (
+                    df["Resultado Detecção"]
+                    ==
+                    "Problema confirmado"
+                ).sum(),
+
+
+
+                (
+                    df["Resultado Detecção"]
+                    ==
+                    "Falso positivo"
+                ).sum(),
+
+
+
+                (
+                    df["Resultado Detecção"]
+                    ==
+                    "Pendente"
+                ).sum(),
+
+
+
+                (
+                    df["Resultado Classificação"]
+                    ==
+                    "Classificação correta"
+                ).sum(),
+
+
+
+                (
+                    df["Resultado Classificação"]
+                    ==
+                    "Classe diferente"
+                ).sum()
 
             ]
 
         })
+
 
 
 
@@ -511,50 +553,127 @@ async def main():
         # ==========================================
 
 
-        analise_objeto = df_avaliado.groupby(
-            "Objeto Real"
-        ).agg(
+        analise_objeto = (
 
+            df.groupby(
+                "Objeto Real"
+            )
 
-            Total_Avaliado=(
+            .size()
 
-                "Objeto Real",
+            .reset_index(
+                name="Quantidade"
+            )
 
-                "count"
+        )
 
-            ),
+        # ==========================================
+        # MATRIZ DE ERROS DA IA
+        # ==========================================
+    
+        matriz_erros = (
 
+            df[
 
+                df["Resultado Classificação"]
 
-            Acertos=(
+                ==
 
-                "Resultado",
+                "Classe diferente"
 
-                lambda x:
-                (x == "Acerto").sum()
+            ]
 
-            ),
+            .groupby(
 
-
-
-            Erros=(
-
-                "Resultado",
-
-                lambda x:
-                (x == "Erro").sum()
+                [
+                    "IA Detectou",
+                    "Objeto Real"
+                ]
 
             )
 
+            .size()
 
-        ).reset_index()
+            .reset_index(
 
+                name="Quantidade"
 
+            )
 
+            .sort_values(
 
+                "Quantidade",
+
+                ascending=False
+
+            )
+
+        )
 
         # ==========================================
-        # EXPORTAÇÃO EXCEL
+        # DESEMPENHO POR CLASSE DA IA
+        # ==========================================
+
+        desempenho_ia = (
+
+            df.groupby(
+                "IA Detectou"
+            )
+            .agg(
+
+                Total_Detectado=(
+                    "IA Detectou",
+                    "count"
+                ),
+
+                Problemas_Confirmados=(
+                    "Resultado Detecção",
+                    lambda x:
+                    (
+                        x == "Problema confirmado"
+                    ).sum()
+                ),
+
+                Falsos_Positivos=(
+                    "Resultado Detecção",
+                    lambda x:
+                    (
+                        x == "Falso positivo"
+                    ).sum()
+                ),
+
+                Pendentes=(
+                    "Resultado Detecção",
+                    lambda x:
+                    (
+                        x == "Pendente"
+                    ).sum()
+                ),
+
+                Classificacoes_Corretas=(
+                    "Resultado Classificação",
+                    lambda x:
+                    (
+                        x == "Classificação correta"
+                    ).sum()
+                ),
+
+                Classes_Diferentes=(
+                    "Resultado Classificação",
+                    lambda x:
+                    (
+                        x == "Classe diferente"
+                    ).sum()
+                )
+
+            )
+
+            .reset_index()
+
+        )
+
+        # ==========================================
+        # EXPORTAÇÃO
         # ==========================================
 
 
@@ -585,56 +704,112 @@ async def main():
         ) as writer:
 
 
-
             metricas.to_excel(
-
                 writer,
-
                 sheet_name="Métricas Gerais",
-
                 index=False
-
             )
-
 
 
             analise_objeto.to_excel(
-
                 writer,
-
-                sheet_name="Análise por Problema",
-
+                sheet_name="Análise Problemas",
                 index=False
-
             )
 
+            desempenho_ia.to_excel(
+                writer,
+                sheet_name="Desempenho IA",
+                index=False
+            )
 
+            matriz_erros.to_excel(
+                writer,
+                sheet_name="Matriz de Erros",
+                index=False
+            )
+
+            desempenho_ia.to_excel(
+                writer,
+                sheet_name="Desempenho IA",
+                index=False
+            )
+
+            df.to_excel(
+                writer,
+                sheet_name="Dados Analisados",
+                index=False
+            )
 
 
 
         print("\n===================================")
 
-        print("RELATÓRIO GERADO COM SUCESSO")
+        print(
+            "RELATÓRIO GERADO COM SUCESSO"
+        )
+
+        print(
+            arquivo
+        )
 
         print("===================================")
 
 
+        print("\n========== VALIDAÇÃO ==========")
+
+        print(f"Total capturado: {len(df)}")
+
+        print("\nResultado Detecção:")
+        print(df["Resultado Detecção"].value_counts())
+
+        print("\nResultado Classificação:")
+        print(df["Resultado Classificação"].value_counts())
+
+        print("\nFamílias:")
+        print(df["Família"].value_counts())
+
+        print("===============================\n")
+
+        print("\nValores únicos da IA:")
+        print(sorted(df["IA Detectou"].unique()))
+
+        print("\nValores únicos do Objeto Real:")
+        print(sorted(df["Objeto Real"].unique()))
+
+        nao_identificados = df[
+            df["Família"] == "Não identificado"
+        ]
+
+        print(f"\nNão identificados: {len(nao_identificados)}")
+
+        if len(nao_identificados):
+            print(nao_identificados[["IA Detectou", "Objeto Real"]])
+
+        nao_mapeados = df[
+            df["Resultado Detecção"] == "Objeto IA não mapeado"
+        ]
+
+        print(f"\nObjetos IA não mapeados: {len(nao_mapeados)}")
+
+        if len(nao_mapeados):
+            print(nao_mapeados[["IA Detectou", "Objeto Real"]])
+
+        confirmados = (df["Resultado Detecção"] == "Problema confirmado").sum()
+        falsos = (df["Resultado Detecção"] == "Falso positivo").sum()
+        pendentes = (df["Resultado Detecção"] == "Pendente").sum()
+        nao_confirmados = (df["Resultado Detecção"] == "Não confirmado").sum()
+
         print(
-            f"Arquivo salvo em:\n{arquivo}"
+            f"{confirmados} + {falsos} + {pendentes} + {nao_confirmados}"
         )
-
-
+        print("\nConferência:")
+        print(f"{confirmados} + {falsos} + {pendentes} + {nao_confirmados} = {confirmados + falsos + pendentes + nao_confirmados}")
+        print(f"Total capturado = {len(df)}")
 
         await navegador.close()
 
 
-
-
-
-
-# ==========================================
-# 3. EXECUÇÃO
-# ==========================================
 
 
 if __name__ == "__main__":
