@@ -146,11 +146,6 @@ async def extrair_dados_tabela(pagina):
 
     return dados_extraidos
 
-
-
-
-
-
 async def processar_aba_paralela(
         contexto,
         url,
@@ -672,6 +667,44 @@ async def main():
 
         )
 
+        erros_ia = (
+
+            df[
+
+                (df["Resultado Detecção"] == "Problema confirmado")
+
+                &
+
+                (df["Objeto Real"] != "Pavimentação - Buraco/Panela")
+
+            ]
+
+            .groupby(
+
+                ["IA Detectou", "Objeto Real", "Família"]
+
+            )
+
+            .size()
+
+            .reset_index(name="Quantidade")
+
+            .sort_values(
+
+                "Quantidade",
+
+                ascending=False
+
+            )
+
+        )
+
+        total_erros = len(erros_ia)
+
+        total_classes = erros_ia["Objeto Real"].nunique()
+
+        total_familias = erros_ia["Família"].nunique()
+
         # ==========================================
         # EXPORTAÇÃO
         # ==========================================
@@ -703,6 +736,25 @@ async def main():
             engine="openpyxl"
         ) as writer:
 
+            erros_ia.to_excel(
+                writer,
+                sheet_name="Análise de Erros IA",
+                index=False,
+                startrow=6
+            )
+
+            worksheet = writer.sheets["Análise de Erros IA"]
+
+            worksheet["A1"] = "ANÁLISE DE ERROS DA IA"
+
+            worksheet["A3"] = "Total de erros"
+            worksheet["B3"] = total_erros
+
+            worksheet["A4"] = "Classes diferentes"
+            worksheet["B4"] = total_classes
+
+            worksheet["A5"] = "Famílias afetadas"
+            worksheet["B5"] = total_familias
 
             metricas.to_excel(
                 writer,
@@ -734,6 +786,7 @@ async def main():
                 sheet_name="Desempenho IA",
                 index=False
             )
+
 
             df.to_excel(
                 writer,
